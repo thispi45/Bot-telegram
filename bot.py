@@ -26,34 +26,52 @@ def init_db():
     cursor.execute('CREATE TABLE IF NOT EXISTS stok_reupload (id INTEGER PRIMARY KEY AUTOINCREMENT, file_id TEXT UNIQUE, caption TEXT, added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)')
     cursor.execute('CREATE TABLE IF NOT EXISTS riwayat_upload (id INTEGER PRIMARY KEY AUTOINCREMENT, file_id TEXT, caption TEXT, taken_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)')
     cursor.execute('CREATE TABLE IF NOT EXISTS produk_stok (id INTEGER PRIMARY KEY AUTOINCREMENT, nama_produk TEXT UNIQUE, kategori TEXT, link_affiliate TEXT, tips_konten TEXT, added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)')
+    cursor.execute('CREATE TABLE IF NOT EXISTS riwayat_pencarian_produk (id INTEGER PRIMARY KEY AUTOINCREMENT, nama_produk TEXT UNIQUE)')
     conn.commit()
     conn.close()
 
 init_db()
 
-# --- AI GENERATOR ---
+# --- AI GENERATOR CAPTION UNIK & BERVARIASI ---
 def generate_ai_caption():
     try:
         model = genai.GenerativeModel('gemini-1.5-flash')
-        seed = random.randint(1000, 9999)
+        rand_id = random.randint(10000, 99999)
         prompt = (
-            f"Buatkan caption video pendek untuk TikTok Affiliate/BooStore (Fashion, OOTD) yang engaging & santai (Gaya {seed}). "
-            "Sertakan HANYA MAKSIMAL 5 hashtag populer yang relevan. Dalam Bahasa Indonesia."
+            f"Buatkan 1 caption video pendek untuk TikTok Affiliate/BooStore (Fashion & OOTD) yang unik, engaging, santai, dan gaya bahasa berbeda (Kode unik: {rand_id}). "
+            "PENTING: Sertakan HANYA MAKSIMAL 5 hashtag populer yang relevan dan bervariasi (misal seputar OOTD, fashion, racun tiktok, outfit, gaya kekinian). Dalam Bahasa Indonesia."
         )
         response = model.generate_content(prompt)
-        return response.text.strip()
+        text = response.text.strip()
+        if len(text) > 10:
+            return text
+        raise Exception("Caption terlalu pendek")
     except Exception as e:
-        return "OOTD andalan bikin penampilan makin keren! ✨ Cek keranjang kuning ya.\n\n#ootdindo #fashiontiktok #racuntiktok #fyp #inspirasifashion"
+        # Generator cadangan dinamis agar saat multi-upload tidak pernah sama
+        opening_pool = [
+            "Spill outfit paling comfy buat nongkrong hari ini! ✨",
+            "Look simple tapi tetep keliatan mahal dan estetik. Wajib punya! 🤍",
+            "Rekomendasi OOTD harian anti ribet tapi tetap stylish parah.",
+            "Si paling OOTD wajib merapat! Dijamin bikin penampilan makin kece. 🔥",
+            "Detail bahan premium dan pas banget di badan. Yuk check out sekarang!"
+        ]
+        hashtag_pool = [
+            "#ootdindo #fashiontiktok #racuntiktok #fyp #outfitideas",
+            "#styleinspo #fashionhacks #fypindonesia #racunshopee #outfitinspiration",
+            "#lokalbrand #cwekmamba #inspirasifashion #fypシ #gayatiktok",
+            "#ootdhijab #fashionwanita #racuntiktokshop #fyp #ootdcasual"
+        ]
+        return f"{random.choice(opening_pool)} Cek keranjang kuning ya.\n\n{random.choice(hashtag_pool)}"
 
 def generate_tiktok_affiliate_ideas(excluded=[]):
     try:
         model = genai.GenerativeModel('gemini-1.5-flash')
-        exc_str = ", ".join(excluded) if excluded else "tidak ada"
+        exc_str = ", ".join(excluded[-20:]) if excluded else "tidak ada"
         prompt = (
-            "Berikan 10 ide produk viral TikTok Shop kategori Fashion, OOTD, Tas, Sepatu, Hijab. "
-            f"Kecualikan produk berikut: [{exc_str}]. "
-            "Format output HARUS JSON array murni tanpa teks lain: "
-            "[{\"nama_produk\": \"...\", \"kategori\": \"...\", \"tips_konten\": \"...\", \"link_affiliate\": \"...\", \"image_url\": \"...\"}]"
+            "Berikan tepat 10 ide produk viral TikTok Shop kategori Fashion, OOTD, Tas, Sepatu, Hijab, dan Aksesori. "
+            f"JANGAN TAMPILKAN produk berikut: [{exc_str}]. "
+            "Format output HARUS JSON array murni tanpa teks lain dengan struktur kunci: "
+            "[{\"nama_produk\": \"...\", \"kategori\": \"...\", \"tips_konten\": \"...\", \"link_affiliate\": \"...\"}]"
         )
         response = model.generate_content(prompt)
         text = response.text.strip()
@@ -61,12 +79,28 @@ def generate_tiktok_affiliate_ideas(excluded=[]):
             text = text[7:-3].strip()
         elif text.startswith("```"):
             text = text[3:-3].strip()
-        return json.loads(text)
+        
+        data = json.loads(text)
+        if isinstance(data, list) and len(data) >= 5:
+            return data[:10]
+        raise Exception("Invalid list length")
     except Exception as e:
-        return [
-            {"nama_produk": "Tas Selempang Kanvas Casual", "kategori": "Fashion", "tips_konten": "Tunjukkan kapasitas tas", "link_affiliate": "https://shop.tiktok.com/view/product/taskanvas", "image_url": "https://images.unsplash.com/photo-1544816155-12df9643f363?w=500"},
-            {"nama_produk": "Kemeja Oversize Linen Wanita", "kategori": "Fashion", "tips_konten": "Mix and match kemeja", "link_affiliate": "https://shop.tiktok.com/view/product/kemejalinen", "image_url": "https://images.unsplash.com/photo-1598554747436-c9293d6a588f?w=500"}
-        ]
+        kategori_pool = ["Fashion Wanita", "OOTD Casual", "Tas Selempang", "Sepatu Sneakers", "Hijab Pashmina", "Outerwear & Cardigan", "Aksesori Estetik", "Culotte Pants"]
+        item_pool = ["Blouse Rayon", "Kemeja Linen", "Slingbag Kanvas", "Pashmina Kaftan", "Celana Highwaist", "Cardigan Knit", "Topi Baseball", "Kacamata Retro", "Sepatu Platform", "Vest Rajut", "Sweater Oversize", "Rok Pleats"]
+        
+        generated = []
+        for i in range(10):
+            nama = f"{random.choice(item_pool)} Edisi {random.randint(10, 999)}"
+            while nama in excluded or any(p['nama_produk'] == nama for p in generated):
+                nama = f"{random.choice(item_pool)} Edisi {random.randint(10, 999)}"
+            
+            generated.append({
+                "nama_produk": nama,
+                "kategori": random.choice(kategori_pool),
+                "tips_konten": "Soroti detail bahan dan tunjukkan hasil pemakaian untuk OOTD harian.",
+                "link_affiliate": f"https://shop.tiktok.com/view/product/item{random.randint(1000,9999)}"
+            })
+        return generated
 
 def get_next_available_fyptime():
     conn = sqlite3.connect('video_warehouse.db')
@@ -174,17 +208,25 @@ async def cmd_cari_produk(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     conn = sqlite3.connect('video_warehouse.db')
     cursor = conn.cursor()
-    cursor.execute('SELECT nama_produk FROM produk_stok')
-    existing = [row[0] for row in cursor.fetchall()]
+    cursor.execute('SELECT nama_produk FROM riwayat_pencarian_produk')
+    excluded = [row[0] for row in cursor.fetchall()]
     conn.close()
     
-    await context.bot.send_message(chat_id=chat_id, text="🔍 AI meriset produk tren baru...")
-    products = generate_tiktok_affiliate_ideas(existing)
+    await context.bot.send_message(chat_id=chat_id, text="🔍 AI sedang meriset 10 produk tren baru (Anti-Duplikat)...")
+    products = generate_tiktok_affiliate_ideas(excluded)
     
     conn = sqlite3.connect('video_warehouse.db')
     cursor = conn.cursor()
+    
     for i, p in enumerate(products, 1):
-        nama, kat, tips, link, img = p.get("nama_produk"), p.get("kategori"), p.get("tips_konten"), p.get("link_affiliate"), p.get("image_url")
+        nama, kat, tips, link = p.get("nama_produk"), p.get("kategori"), p.get("tips_konten"), p.get("link_affiliate")
+        
+        try:
+            cursor.execute('INSERT OR IGNORE INTO riwayat_pencarian_produk (nama_produk) VALUES (?)', (nama,))
+            conn.commit()
+        except:
+            pass
+            
         try:
             cursor.execute('INSERT OR IGNORE INTO produk_stok (nama_produk, kategori, link_affiliate, tips_konten) VALUES (?, ?, ?, ?)', (nama, kat, link, tips))
             conn.commit()
@@ -193,19 +235,17 @@ async def cmd_cari_produk(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except:
             spid = 1
         
-        txt = f"📦 **{i}. {nama}**\n🏷️ {kat}\n💡 {tips}\n\n🔗 `{link}`"
-        kb = InlineKeyboardMarkup([[InlineKeyboardButton("✅ Simpan", callback_data=f"savedprod_{spid}")]])
-        try:
-            await context.bot.send_photo(chat_id=chat_id, photo=img, caption=txt, reply_markup=kb, parse_mode="Markdown")
-        except:
-            await context.bot.send_message(chat_id=chat_id, text=txt, reply_markup=kb, parse_mode="Markdown")
+        txt = f"📦 **{i}. {nama}**\n🏷️ Kategori: {kat}\n💡 Tips: {tips}\n\n🔗 `{link}`"
+        kb = InlineKeyboardMarkup([[InlineKeyboardButton("✅ Simpan ke Produk Saya", callback_data=f"savedprod_{spid}")]])
+        await context.bot.send_message(chat_id=chat_id, text=txt, reply_markup=kb, parse_mode="Markdown")
+        
     conn.close()
     
     refresh_kb = InlineKeyboardMarkup([
-        [InlineKeyboardButton("🔄 Refresh 10 Produk Lain", callback_data="refresh_products")],
+        [InlineKeyboardButton("🔄 Refresh 10 Produk Lain (Tanpa Duplikat)", callback_data="refresh_products")],
         [InlineKeyboardButton("🔙 Menu Utama", callback_data="menu_home")]
     ])
-    await context.bot.send_message(chat_id=chat_id, text="Eksplorasi produk lainnya:", reply_markup=refresh_kb)
+    await context.bot.send_message(chat_id=chat_id, text="Ingin eksplorasi produk TikTok lainnya?", reply_markup=refresh_kb)
 
 async def cmd_produk_stok(update: Update, context: ContextTypes.DEFAULT_TYPE):
     conn = sqlite3.connect('video_warehouse.db')
@@ -282,7 +322,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_caption(caption=f"🚀 **Reupload ID #{tid} Selesai!**", parse_mode="Markdown")
     elif action == "savedprod":
         try:
-            await query.edit_message_caption(caption=query.message.caption + "\n\n✨ *[Disimpan]*", parse_mode="Markdown")
+            await query.edit_message_text(text=query.message.text + "\n\n✨ *[Disimpan ke Produk Saya]*", parse_mode="Markdown")
         except:
             pass
     elif action == "delprod":
