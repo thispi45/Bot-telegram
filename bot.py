@@ -60,7 +60,6 @@ def init_db():
         )
     ''')
     
-    # Stok Produk TikTok Affiliate Pilihan
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS produk_stok (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -92,7 +91,6 @@ def generate_ai_caption():
         return "Konten menarik hari ini! 🔥 Jangan lupa tonton sampai habis ya.\n\n#fyp #viral #trending #foryoupage"
 
 def generate_tiktok_affiliate_ideas():
-    """Meminta AI menghasilkan 10 ide produk TikTok Affiliate yang sedang tren."""
     try:
         model = genai.GenerativeModel('gemini-1.5-flash')
         prompt = (
@@ -316,7 +314,6 @@ async def cmd_cari_produk(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"🔗 **Link Affiliate:** `{link}`"
         )
         
-        # Simpan sementara ke database produk_stok ketika tombol diklik
         conn = sqlite3.connect('video_warehouse.db')
         cursor = conn.cursor()
         cursor.execute(
@@ -328,4 +325,181 @@ async def cmd_cari_produk(update: Update, context: ContextTypes.DEFAULT_TYPE):
         conn.close()
         
         keyboard = [[InlineKeyboardButton("✅ Simpan ke Stok Produk Saya", callback_data=f"savedprod_{saved_id}")]]
-        await context.bot.send_message(chat_id=chat_id, text=text, re
+        await context.bot.send_message(chat_id=chat_id, text=text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+
+    refresh_keyboard = [
+        [InlineKeyboardButton("🔄 Cari 10 Produk Lainnya (Refresh)", callback_data="refresh_products")],
+        [InlineKeyboardButton("🔙 Menu Utama", callback_data="menu_home")]
+    ]
+    await context.bot.send_message(chat_id=chat_id, text="Ingin eksplorasi produk TikTok lainnya?", reply_markup=InlineKeyboardMarkup(refresh_keyboard))
+
+async def cmd_produk_stok(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    conn = sqlite3.connect('video_warehouse.db')
+    cursor = conn.cursor()
+    cursor.execute('SELECT id, nama_produk, kategori, link_affiliate, tips_konten FROM produk_stok LIMIT 10')
+    rows = cursor.fetchall()
+    conn.close()
+
+    chat_id = update.effective_chat.id
+    if not rows:
+        text = "📦 Stok produk affiliate Anda masih kosong.\nGunakan menu *Cari Produk Affiliate*."
+        keyboard = [[InlineKeyboardButton("🔙 Kembali ke Menu Utama", callback_data="menu_home")]]
+        if update.message:
+            await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
+        else:
+            await update.callback_query.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
+        return
+
+    await context.bot.send_message(chat_id=chat_id, text="📦 **Daftar Stok Produk TikTok Affiliate Pilihan:**")
+    for r in rows:
+        spid, nama, kategori, link, tips = r[0], r[1], r[2], r[3], r[4]
+        text = (
+            f"📦 **{nama}**\n"
+            f"🏷️ Kategori: *{kategori}*\n"
+            f"💡 Tips: {tips}\n\n"
+            f"🔗 **Link:** `{link}`"
+        )
+        keyboard = [[InlineKeyboardButton("🗑️ Hapus dari Stok", callback_data=f"delprod_{spid}")]]
+        await context.bot.send_message(chat_id=chat_id, text=text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+
+# --- HANDLER TOMBOL INTERAKTIF (CALLBACK) ---
+async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    
+    data = query.data
+
+    if data == "menu_home":
+        await cmd_start(update, context)
+        return
+    elif data == "menu_gudang":
+        await cmd_gudang(update, context)
+        return
+    elif data == "menu_stok_siap":
+        await cmd_stok_siap(update, context)
+        return
+    elif data == "menu_reupload":
+        await cmd_stok_reupload(update, context)
+        return
+    elif data == "menu_riwayat":
+        await cmd_riwayat(update, context)
+        return
+    elif data == "menu_cari_produk":
+        await cmd_cari_produk(update, context)
+        return
+    elif data == "menu_produk_stok":
+        await cmd_produk_stok(update, context)
+        return
+    elif data == "refresh_products":
+        await query.message.edit_text("🔄 Menyegarkan daftar 10 produk TikTok baru...")
+        await cmd_cari_produk(update, context)
+        return
+
+    parts = data.split("_")
+    action, target_id = parts[0], parts[1]
+
+    conn = sqlite3.connect('video_warehouse.db')
+    cursor = conn.cursor()
+
+    if action == "take":
+        cursor.execute('SELECT file_id, generated_caption FROM stok_siap WHERE id = ?', (target_id,))
+        row = cursor.fetchone()
+        if row:
+            cursor.execute('INSERT INTO riwayat_upload (file_id, caption) VALUES (?, ?)', (row[0], row[1]))
+            cursor.execute('DELETE FROM stok_siap WHERE id = ?', (target_id,))
+            conn.commit()
+            await query.edit_message_caption(caption=f"✅ **ID #{target_id} Berhasil Diambil ke Riwayat!**")
+
+    elif action == "reup" or action == "movetoreup":
+        table = "stok_siap" if action == "reup" else "riwayat_upload"
+        cursor.execute(f'SELECT file_id, { "generated_caption" if action=="reup" else "caption" } FROM {table} WHERE id = ?', (target_id,))
+        row = cursor.fetchone()
+        if row:
+            cursor.execute('INSERT OR IGNORE INTO stok_reupload (file_id, caption) VALUES (?, ?)', (row[0], row[1]))
+            if action == "reup":
+                cursor.execute('DELETE FROM stok_siap WHERE id = ?', (target_id,))
+            conn.commit()
+            if action == "reup":
+                await query.edit_message_caption(caption=f"🔄 **ID #{target_id} Dipindah ke Stok Reupload!**")
+            else:
+                await query.edit_message_caption(caption=f"🔄 **Riwayat ID #{target_id} Dipindah ke Stok Reupload!**")
+
+    elif action == "getreup":
+        cursor.execute('DELETE FROM stok_reupload WHERE id = ?', (target_id,))
+        conn.commit()
+        await query.edit_message_caption(caption=f"🚀 **Konten Reupload ID #{target_id} Selesai Digunakan!**")
+
+    elif action == "savedprod":
+        await query.edit_message_text(text=query.message.text + "\n\n✨ *[Status: Disimpan ke Stok Produk Saya]*", parse_mode="Markdown")
+
+    elif action == "delprod":
+        cursor.execute('DELETE FROM produk_stok WHERE id = ?', (target_id,))
+        conn.commit()
+        await query.edit_message_text(text="🗑️ **Produk Berhasil Dihapus dari Stok.**")
+
+    conn.close()
+
+# --- HANDLER VIDEO MASUK ---
+async def handle_new_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    message = update.message
+    if not message or not message.video:
+        return
+
+    if str(message.chat.id) != TARGET_CHAT_ID:
+        return
+
+    video = message.video
+    file_id = video.file_id
+
+    conn = sqlite3.connect('video_warehouse.db')
+    cursor = conn.cursor()
+    
+    try:
+        cursor.execute('INSERT INTO video_warehouse (file_id) VALUES (?)', (file_id,))
+        conn.commit()
+        conn.close()
+
+        status_msg = await message.reply_text("📥 **Video masuk Gudang PM!**\n🤖 AI sedang memproses caption...")
+
+        await process_incoming_video(context.application, file_id)
+
+        conn = sqlite3.connect('video_warehouse.db')
+        cursor = conn.cursor()
+        cursor.execute('SELECT generated_caption, scheduled_time, id FROM stok_siap WHERE file_id = ?', (file_id,))
+        res = cursor.fetchone()
+        conn.close()
+
+        if res:
+            caption_hasil, jadwal_fyp, stock_id = res[0], res[1], res[2]
+            keyboard = [[InlineKeyboardButton("🔙 Buka Menu Utama", callback_data="menu_home")]]
+            await status_msg.edit_text(
+                f"✨ **Konten Masuk Stok Siap! (ID: #{stock_id})**\n\n"
+                f"📅 **Jadwal:** {jadwal_fyp}\n\n"
+                f"📝 **Caption:**\n{caption_hasil}",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+
+    except sqlite3.IntegrityError:
+        await message.reply_text("⚠️ Video ini sudah pernah dimasukkan sebelumnya.")
+        conn.close()
+
+# --- MAIN ---
+def main():
+    app = Application.builder().token(TELEGRAM_TOKEN).build()
+
+    app.add_handler(CommandHandler("start", cmd_start))
+    app.add_handler(CommandHandler("gudang", cmd_gudang))
+    app.add_handler(CommandHandler("stok_siap", cmd_stok_siap))
+    app.add_handler(CommandHandler("stok_reupload", cmd_stok_reupload))
+    app.add_handler(CommandHandler("riwayat", cmd_riwayat))
+    app.add_handler(CommandHandler("cari_produk", cmd_cari_produk))
+    app.add_handler(CommandHandler("produk_stok", cmd_produk_stok))
+    
+    app.add_handler(CallbackQueryHandler(button_handler))
+    app.add_handler(MessageHandler(filters.VIDEO & filters.ChatType.PRIVATE, handle_new_video))
+
+    print("🤖 Asisten Konten & TikTok Affiliate Aktif 24 Jam...")
+    app.run_polling()
+
+if __name__ == '__main__':
+    main()
