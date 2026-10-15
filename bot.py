@@ -5,7 +5,7 @@ import json
 import random
 import asyncio
 import tempfile
-import google.generativeai as genai
+from google import genai
 from datetime import datetime
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, ContextTypes, filters
@@ -15,7 +15,8 @@ TELEGRAM_TOKEN = "8969354921:AAHPlpEiQFabiq0ZPDherqXLXOYqhhvrrls"
 GEMINI_API_KEY = "AQ.Ab8RN6KJxM73ztwzk1T4R5I6Gl3PO_Ckoc_BEFEDu0MNN3"
 TARGET_CHAT_ID = "737094524"
 
-genai.configure(api_key=GEMINI_API_KEY)
+# Inisialisasi client resmi google-genai
+client = genai.Client(api_key=GEMINI_API_KEY)
 
 SCHEDULE_SLOTS = ["12:00 WIB", "19:00 WIB"]
 
@@ -34,30 +35,36 @@ def init_db():
 
 init_db()
 
-# --- AI ANALISIS VISUAL VIDEO (NYAMBUNG DENGAN ISI VIDEO) ---
+# --- AI ANALISIS VISUAL VIDEO MENGGUNAKAN GOOGLE-GENAI SDK ---
 def generate_ai_caption_from_video(video_path):
     uploaded_file = None
     try:
-        uploaded_file = genai.upload_file(video_path, mime_type="video/mp4")
+        # Mengunggah video menggunakan client.files dari google-genai
+        uploaded_file = client.files.upload(file=video_path, config={"mime_type": "video/mp4"})
         
+        # Menunggu proses server selesai
         while uploaded_file.state.name == "PROCESSING":
-            time.sleep(1)
-            uploaded_file = genai.get_file(uploaded_file.name)
+            time.sleep(2)
+            uploaded_file = client.files.get(name=uploaded_file.name)
             
         if uploaded_file.state.name == "FAILED":
             raise Exception("Gagal memproses video di server AI")
 
-        model = genai.GenerativeModel('gemini-1.5-flash')
         rand_id = random.randint(100000, 999999)
         prompt = (
             f"Analisis video produk TikTok Affiliate/BooStore ini secara visual. Buatkan 1 caption pendek yang sangat engaging, santai, kekinian, dan NYAMBUNG persis dengan produk/kegiatan di dalam video (Kode unik: {rand_id}). "
             "PENTING: Sertakan HANYA MAKSIMAL 5 hashtag populer yang sangat relevan dengan produk dalam video tersebut. Dalam Bahasa Indonesia."
         )
         
-        response = model.generate_content([uploaded_file, prompt])
+        # Generate konten menggunakan model gemini-2.5-flash atau gemini-1.5-flash
+        response = client.models.generate_content(
+            model='gemini-1.5-flash',
+            contents=[uploaded_file, prompt]
+        )
         
+        # Hapus file dari server AI setelah selesai
         try:
-            genai.delete_file(uploaded_file.name)
+            client.files.delete(name=uploaded_file.name)
         except:
             pass
             
@@ -69,10 +76,10 @@ def generate_ai_caption_from_video(video_path):
     except Exception as e:
         if uploaded_file:
             try:
-                genai.delete_file(uploaded_file.name)
+                client.files.delete(name=uploaded_file.name)
             except:
                 pass
-        # Fallback cadangan bervariasi
+        # Fallback cadangan bervariasi jika gagal terhubung
         opening_pool = [
             "Spill produk andalan bikin penampilan makin keren! ✨",
             "Look simple tapi tetep keliatan estetik dan wajib punya! 🤍",
@@ -83,7 +90,6 @@ def generate_ai_caption_from_video(video_path):
 
 def generate_tiktok_affiliate_ideas(excluded=[]):
     try:
-        model = genai.GenerativeModel('gemini-1.5-flash')
         exc_str = ", ".join(excluded[-20:]) if excluded else "tidak ada"
         prompt = (
             "Berikan tepat 10 ide produk viral TikTok Shop kategori Fashion, OOTD, Tas, Sepatu, Hijab, dan Aksesori. "
@@ -91,7 +97,10 @@ def generate_tiktok_affiliate_ideas(excluded=[]):
             "Format output HARUS JSON array murni tanpa teks lain dengan struktur kunci: "
             "[{\"nama_produk\": \"...\", \"kategori\": \"...\", \"tips_konten\": \"...\", \"link_affiliate\": \"...\"}]"
         )
-        response = model.generate_content(prompt)
+        response = client.models.generate_content(
+            model='gemini-1.5-flash',
+            contents=prompt
+        )
         text = response.text.strip()
         if text.startswith("```json"):
             text = text[7:-3].strip()
@@ -275,9 +284,6 @@ async def cmd_cari_produk(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
         txt = f"📦 **{i}. {nama}**\n🏷️ Kategori: {kat}\n💡 Tips: {tips}\n\n🔗 `{link}`"
         
-        # Tombol Simpan mengirim data produk mentah lewat callback data terstruktur
-        payload = json.dumps({"n": nama, "k": kat, "l": link, "t": tips})
-        # Telegram callback_data limit is 64 bytes, so we use a safe temporary table mapping instead
         cursor.execute('INSERT OR IGNORE INTO produk_stok (nama_produk, kategori, link_affiliate, tips_konten) VALUES (?, ?, ?, ?)', (nama, kat, link, tips))
         conn.commit()
         cursor.execute('SELECT id FROM produk_stok WHERE nama_produk = ?', (nama,))
@@ -387,14 +393,14 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_caption(caption=f"🗑️ **Riwayat ID #{tid} Berhasil Dihapus!**", parse_mode="Markdown")
     conn.close()
 
-# --- HANDLER UPLOAD VIDEO (SINGLE & MULTI) ---
+# --- HANDLER UPLOAD VIDEO DENGAN ANALISIS VISUAL SDK BARU ---
 async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.message
     if not msg or not msg.video or str(msg.chat.id) != TARGET_CHAT_ID:
         return
     
     file_id = msg.video.file_id
-    status_msg = await msg.reply_text("📥 **Video masuk Gudang!**\n🤖 AI sedang menonton dan menganalisis isi video...", parse_mode="Markdown")
+    status_msg = await msg.reply_text("📥 **Video masuk Gudang!**\n🤖 AI sedang menonton dan menganalisis visual isi video...", parse_mode="Markdown")
     
     res = await process_single_video(context.application, file_id)
     if res:
@@ -421,7 +427,7 @@ def main():
     app.add_handler(CommandHandler("produk_stok", cmd_produk_stok))
     app.add_handler(CallbackQueryHandler(button_handler))
     app.add_handler(MessageHandler(filters.VIDEO & filters.ChatType.PRIVATE, handle_video))
-    print("🤖 Bot Asisten Aktif 24 Jam...")
+    print("🤖 Bot Asisten SDK Terbaru Aktif 24 Jam...")
     app.run_polling()
 
 if __name__ == '__main__':
