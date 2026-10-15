@@ -3,8 +3,6 @@ import sqlite3
 import time
 import json
 import random
-import asyncio
-import tempfile
 from google import genai
 from datetime import datetime
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -15,7 +13,6 @@ TELEGRAM_TOKEN = "8969354921:AAHPlpEiQFabiq0ZPDherqXLXOYqhhvrrls"
 GEMINI_API_KEY = "AQ.Ab8RN6KJxM73ztwzk1T4R5I6Gl3PO_Ckoc_BEFEDu0MNN3"
 TARGET_CHAT_ID = "737094524"
 
-# Inisialisasi client resmi google-genai
 client = genai.Client(api_key=GEMINI_API_KEY)
 
 SCHEDULE_SLOTS = ["12:00 WIB", "19:00 WIB"]
@@ -35,58 +32,24 @@ def init_db():
 
 init_db()
 
-# --- AI ANALISIS VISUAL VIDEO MENGGUNAKAN GOOGLE-GENAI SDK ---
-def generate_ai_caption_from_video(video_path):
-    uploaded_file = None
+# --- AI GENERATOR CAPTION BERDASARKAN NAMA PRODUK ---
+def generate_ai_caption_by_product(product_name):
     try:
-        # Mengunggah video menggunakan client.files dari google-genai
-        uploaded_file = client.files.upload(file=video_path, config={"mime_type": "video/mp4"})
-        
-        # Menunggu proses server selesai
-        while uploaded_file.state.name == "PROCESSING":
-            time.sleep(2)
-            uploaded_file = client.files.get(name=uploaded_file.name)
-            
-        if uploaded_file.state.name == "FAILED":
-            raise Exception("Gagal memproses video di server AI")
-
-        rand_id = random.randint(100000, 999999)
+        rand_seed = random.randint(100000, 999999)
         prompt = (
-            f"Analisis video produk TikTok Affiliate/BooStore ini secara visual. Buatkan 1 caption pendek yang sangat engaging, santai, kekinian, dan NYAMBUNG persis dengan produk/kegiatan di dalam video (Kode unik: {rand_id}). "
-            "PENTING: Sertakan HANYA MAKSIMAL 5 hashtag populer yang sangat relevan dengan produk dalam video tersebut. Dalam Bahasa Indonesia."
+            f"Buatkan 1 caption video pendek untuk TikTok Affiliate/BooStore yang sangat engaging, santai, dan estetik khusus untuk produk: '{product_name}' (Variasi gaya #{rand_seed}). "
+            "PENTING: Sertakan HANYA MAKSIMAL 5 hashtag populer yang sangat relevan dengan produk tersebut. Dalam Bahasa Indonesia."
         )
-        
-        # Generate konten menggunakan model gemini-2.5-flash atau gemini-1.5-flash
         response = client.models.generate_content(
             model='gemini-1.5-flash',
-            contents=[uploaded_file, prompt]
+            contents=prompt
         )
-        
-        # Hapus file dari server AI setelah selesai
-        try:
-            client.files.delete(name=uploaded_file.name)
-        except:
-            pass
-            
         text = response.text.strip()
         if len(text) > 10:
             return text
-        raise Exception("Caption terlalu pendek")
-        
+        raise Exception("Too short")
     except Exception as e:
-        if uploaded_file:
-            try:
-                client.files.delete(name=uploaded_file.name)
-            except:
-                pass
-        # Fallback cadangan bervariasi jika gagal terhubung
-        opening_pool = [
-            "Spill produk andalan bikin penampilan makin keren! ✨",
-            "Look simple tapi tetep keliatan estetik dan wajib punya! 🤍",
-            "Rekomendasi produk harian anti ribet tapi fungsional banget."
-        ]
-        hashtag_pool = ["#ootdindo #fashiontiktok #racuntiktok #fyp #outfitideas", "#styleinspo #fypindonesia #racunshopee #outfitinspiration"]
-        return f"{random.choice(opening_pool)} Cek keranjang kuning ya.\n\n{random.choice(hashtag_pool)}"
+        return f"Spill {product_name} paling comfy dan wajib punya! ✨ Bikin penampilan makin estetik.\n\nCek keranjang kuning ya bestie!\n\n#fyp #racuntiktok #tiktokaffiliate #outfitideas #{product_name.replace(' ', '').lower()}"
 
 def generate_tiktok_affiliate_ideas(excluded=[]):
     try:
@@ -97,10 +60,7 @@ def generate_tiktok_affiliate_ideas(excluded=[]):
             "Format output HARUS JSON array murni tanpa teks lain dengan struktur kunci: "
             "[{\"nama_produk\": \"...\", \"kategori\": \"...\", \"tips_konten\": \"...\", \"link_affiliate\": \"...\"}]"
         )
-        response = client.models.generate_content(
-            model='gemini-1.5-flash',
-            contents=prompt
-        )
+        response = client.models.generate_content(model='gemini-1.5-flash', contents=prompt)
         text = response.text.strip()
         if text.startswith("```json"):
             text = text[7:-3].strip()
@@ -110,9 +70,9 @@ def generate_tiktok_affiliate_ideas(excluded=[]):
         data = json.loads(text)
         if isinstance(data, list) and len(data) >= 5:
             return data[:10]
-        raise Exception("Invalid list length")
+        raise Exception("Invalid length")
     except Exception as e:
-        kategori_pool = ["Fashion Wanita", "OOTD Casual", "Tas Selempang", "Sepatu Sneakers", "Hijab Pashmina", "Outerwear", "Aksesori"]
+        kategori_pool = ["Fashion Wanita", "OOTD Casual", "Tas Selempang", "Sepatu Sneakers", "Hijab Pashmina", "Outerwear & Cardigan", "Aksesori Estetik", "Culotte Pants"]
         item_pool = ["Blouse Rayon", "Kemeja Linen", "Slingbag Kanvas", "Pashmina Kaftan", "Celana Highwaist", "Cardigan Knit", "Topi Baseball", "Kacamata Retro", "Sepatu Platform"]
         
         generated = []
@@ -124,7 +84,7 @@ def generate_tiktok_affiliate_ideas(excluded=[]):
             generated.append({
                 "nama_produk": nama,
                 "kategori": random.choice(kategori_pool),
-                "tips_konten": "Soroti detail bahan dan tunjukkan hasil pemakaian.",
+                "tips_konten": "Soroti detail bahan dan tunjukkan hasil pemakaian untuk OOTD harian.",
                 "link_affiliate": f"https://shop.tiktok.com/view/product/item{random.randint(1000,9999)}"
             })
         return generated
@@ -146,37 +106,6 @@ def get_next_available_fyptime():
                 return cand
         offset += 1
 
-async def process_single_video(bot_app, file_id):
-    try:
-        file_obj = await bot_app.bot.get_file(file_id)
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as temp_video:
-            temp_path = temp_video.name
-            await file_obj.download_to_drive(temp_path)
-            
-        loop = asyncio.get_event_loop()
-        caption = await loop.run_in_executor(None, generate_ai_caption_from_video, temp_path)
-        
-        try:
-            os.remove(temp_path)
-        except:
-            pass
-            
-        slot = get_next_available_fyptime()
-        
-        conn = sqlite3.connect('video_warehouse.db')
-        cursor = conn.cursor()
-        cursor.execute('INSERT OR IGNORE INTO video_warehouse (file_id) VALUES (?)', (file_id,))
-        cursor.execute('INSERT INTO stok_siap (file_id, generated_caption, scheduled_time, status) VALUES (?, ?, ?, "READY")', (file_id, caption, slot))
-        conn.commit()
-        
-        cursor.execute('SELECT id, scheduled_time, generated_caption FROM stok_siap WHERE file_id = ?', (file_id,))
-        res = cursor.fetchone()
-        conn.close()
-        return res
-    except Exception as e:
-        print(f"Error process video: {e}")
-        return None
-
 # --- MENU UTAMA ---
 def get_main_menu():
     return InlineKeyboardMarkup([
@@ -186,7 +115,12 @@ def get_main_menu():
     ])
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = "👋 **Asisten Konten & TikTok Affiliate Aktif!**\nPilih menu di bawah:"
+    text = (
+        "👋 **Asisten Konten & TikTok Affiliate Aktif!**\n\n"
+        "💡 **Cara Pakai:**\n"
+        "Kirim video ke sini, lalu **Reply (Balas) video tersebut** dengan mengetik nama produknya (Contoh: *Kemeja Oversize*), maka AI akan membuatkan caption & hashtag yang super akurat!\n\n"
+        "Pilih menu di bawah:"
+    )
     if update.message:
         await update.message.reply_text(text, reply_markup=get_main_menu(), parse_mode="Markdown")
     else:
@@ -393,28 +327,55 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_caption(caption=f"🗑️ **Riwayat ID #{tid} Berhasil Dihapus!**", parse_mode="Markdown")
     conn.close()
 
-# --- HANDLER UPLOAD VIDEO DENGAN ANALISIS VISUAL SDK BARU ---
-async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# --- HANDLER UPLOAD & REPLY VIDEO ---
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.message
-    if not msg or not msg.video or str(msg.chat.id) != TARGET_CHAT_ID:
+    if not msg or str(msg.chat.id) != TARGET_CHAT_ID:
         return
     
-    file_id = msg.video.file_id
-    status_msg = await msg.reply_text("📥 **Video masuk Gudang!**\n🤖 AI sedang menonton dan menganalisis visual isi video...", parse_mode="Markdown")
-    
-    res = await process_single_video(context.application, file_id)
-    if res:
-        stock_id, jadwal, caption_hasil = res[0], res[1], res[2]
-        markup = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Menu Utama", callback_data="menu_home")]])
-        await status_msg.edit_text(
-            f"✨ **Stok Siap Masuk! (ID: #{stock_id})**\n"
-            f"📅 **Jadwal:** {jadwal}\n\n"
-            f"📝 **Caption Sesuai Video:**\n{caption_hasil}",
-            reply_markup=markup,
-            parse_mode="Markdown"
-        )
-    else:
-        await status_msg.edit_text("⚠️ Gagal memproses video.")
+    # 1. Jika pengguna mengirim video baru (simpan sementara ke warehouse/menunggu nama produk)
+    if msg.video:
+        file_id = msg.video.file_id
+        conn = sqlite3.connect('video_warehouse.db')
+        cursor = conn.cursor()
+        cursor.execute('INSERT OR IGNORE INTO video_warehouse (file_id) VALUES (?)', (file_id,))
+        conn.commit()
+        conn.close()
+        await msg.reply_text("📥 **Video diterima di Gudang!**\n💬 Silakan **Reply (Balas) video ini** dengan mengetik nama produknya (Contoh: *Tas Selempang Kulit*) agar AI membuatkan caption & hashtag yang pas.", parse_mode="Markdown")
+        return
+
+    # 2. Jika pengguna membalas (reply) video dengan mengetik nama produk
+    if msg.reply_to_message and msg.reply_to_message.video and msg.text:
+        file_id = msg.reply_to_message.video.file_id
+        product_name = msg.text.strip()
+        
+        status_msg = await msg.reply_text(f"🤖 AI sedang meriset caption khusus untuk produk: **{product_name}**...", parse_mode="Markdown")
+        
+        caption = generate_ai_caption_by_product(product_name)
+        slot = get_next_available_fyptime()
+        
+        conn = sqlite3.connect('video_warehouse.db')
+        cursor = conn.cursor()
+        try:
+            cursor.execute('INSERT INTO stok_siap (file_id, generated_caption, scheduled_time, status) VALUES (?, ?, ?, "READY")', (file_id, caption, slot))
+            conn.commit()
+            cursor.execute('SELECT id, scheduled_time, generated_caption FROM stok_siap WHERE file_id = ? ORDER BY id DESC LIMIT 1', (file_id,))
+            res = cursor.fetchone()
+            conn.close()
+            
+            if res:
+                stock_id, jadwal, caption_hasil = res[0], res[1], res[2]
+                markup = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Menu Utama", callback_data="menu_home")]])
+                await status_msg.edit_text(
+                    f"✨ **Stok Siap Masuk! (ID: #{stock_id})**\n"
+                    f"📅 **Jadwal:** {jadwal}\n\n"
+                    f"📝 **Caption untuk {product_name}:**\n{caption_hasil}",
+                    reply_markup=markup,
+                    parse_mode="Markdown"
+                )
+        except Exception as e:
+            conn.close()
+            await status_msg.edit_text("⚠️ Gagal memproses jadwal stok.")
 
 def main():
     app = Application.builder().token(TELEGRAM_TOKEN).build()
@@ -426,8 +387,8 @@ def main():
     app.add_handler(CommandHandler("cari_produk", cmd_cari_produk))
     app.add_handler(CommandHandler("produk_stok", cmd_produk_stok))
     app.add_handler(CallbackQueryHandler(button_handler))
-    app.add_handler(MessageHandler(filters.VIDEO & filters.ChatType.PRIVATE, handle_video))
-    print("🤖 Bot Asisten SDK Terbaru Aktif 24 Jam...")
+    app.add_handler(MessageHandler(filters.VIDEO | filters.TEXT & filters.ChatType.PRIVATE, handle_message))
+    print("🤖 Bot Asisten Reply Produk Aktif 24 Jam...")
     app.run_polling()
 
 if __name__ == '__main__':
